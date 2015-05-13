@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>Ryu Topology Viewer</title>
+	<link rel="stylesheet" type="text/css" href="style.css">
+</head>
+<body>
+	<div id="nav">
+        <span id="icon"></span>
+        <ul>
+            <li><a href="#">Debug</a></li>
+            <li><a href="#">Statistic</a></li>
+            <li><a href="#">Overview</a></li>
+        </ul>
+	</div>
+	<div id="main" class="hwidth">
+		<h2>Topology Viewer</h2>
+		<div id="canvas"></div>
+	</div>
+	<div id="sidebar" class="hide">
+        <div id="sidebar-content">
+        	<h2 class="inline">Active Flows:&nbsp;&nbsp;&nbsp;</h2>
+            <h2 class="inline" id="flow-count">0</h2>
+            <div id="list">
+            </div>
+        </div>
+	</div>
+	<div id="footer">
+		<h3>Copyright @ Ming</h3>
+	</div>
+
+    <script src="jquery-1.11.2.min.js" charset="utf-8"></script>
+    <script src="d3.min.js" charset="utf-8"></script>
+    <script src="jsnetworkx.js" charset="utf-8"></script>
+    <script src="script.js" charset="utf-8"></script>
+</body>
+</html>
