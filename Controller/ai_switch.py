@@ -21,23 +21,24 @@ class AISwitch(app_manager.RyuApp):
 
     def __init__(self, *args, **kwargs):
         super(AISwitch, self).__init__(*args, **kwargs)
-        
+
         self.datapaths = {}
         self.portmap = {}
         self.data = {}
         self.graph = nx.Graph()
         self.default_weight = 1
-        
+
         self.active_flows = {}
         self.statistics = {}
         self.flow_rate = {}
-        
+
         self._measurement = hub.spawn(self._measurement)
         self._update = hub.spawn(self._update)
         
+
         wsgi = kwargs['wsgi']
         wsgi.register(FlowViewer, {'ai_switch_app': self})
-    
+
     def _update(self):
         while True:
             for i in self.data:
@@ -62,7 +63,7 @@ class AISwitch(app_manager.RyuApp):
                         if update_path[0] == src:
                             update_path.append(dst)
                         else:
-                            update_path.insert(0, dst)                    
+                            update_path.insert(0, dst)
                     for i in xrange(len(update_path)-1):
                         s, t = update_path[i], update_path[i+1]
                         if s > t:
@@ -74,7 +75,7 @@ class AISwitch(app_manager.RyuApp):
         while True:
             print 'ActiveFlows: ', self.active_flows
             print 'FlowRate: ', self.flow_rate
-            if len(self.active_flows) != 0:  
+            if len(self.active_flows) != 0:
                 for path in self.active_flows:
                     if path.split('-')[0] == str(self.active_flows[path][-1]):
                         target = self.active_flows[path][0]
@@ -85,7 +86,7 @@ class AISwitch(app_manager.RyuApp):
                             self._request_stats(dp)
                             break
             hub.sleep(1)
-    
+
     def _request_stats(self, datapath):
         ofproto = datapath.ofproto
         parser = datapath.ofproto_parser
@@ -158,7 +159,7 @@ class AISwitch(app_manager.RyuApp):
             self.active_flows[key].append(datapath.id)
             self.active_flows[key] = reduce(lambda a, b: b[0] in a and a or a + b, [[i] for i in self.active_flows[key]])
         elif dl_type == 2054:
-            match = parser.OFPMatch(eth_type=dl_type, arp_spa=arp_tpa, arp_tpa=arp_tpa) 
+            match = parser.OFPMatch(eth_type=dl_type, arp_spa=arp_tpa, arp_tpa=arp_tpa)
         elif dl_type == None:
             match = parser.OFPMatch(eth_src=eth_src, eth_dst=eth_dst)
             src = int(eth_src.split(':')[-1], 16)
@@ -171,7 +172,7 @@ class AISwitch(app_manager.RyuApp):
             print 'ADD ERROR'
 
         mod = parser.OFPFlowMod(datapath=datapath, priority=priority,
-	                                    match=match, instructions=inst, 
+	                                    match=match, instructions=inst,
 	                                    command=ofproto.OFPFC_ADD, idle_timeout=soft_timeout,
 	                                    hard_timeout=hard_timeout, flags=ofproto.OFPFF_SEND_FLOW_REM)
         datapath.send_msg(mod)
@@ -222,7 +223,7 @@ class AISwitch(app_manager.RyuApp):
                     del self.flow_rate[key]
             except:
                 pass
-        
+
         elif 'eth_src' in msg.match:
             src = int(msg.match['eth_src'].split(':')[-1], 16)
             dst = int(msg.match['eth_dst'].split(':')[-1], 16)
@@ -277,22 +278,22 @@ class AISwitch(app_manager.RyuApp):
 
             src = int(arp_pkt.src_ip.split('.')[-1])
             dst = int(arp_pkt.dst_ip.split('.')[-1])
-            
+
             path = nx.shortest_path(self.graph, source=ev.msg.datapath.id, target=dst)
 
             for i in xrange(len(path)-1):
                 src = path[i]
                 dst = path[i+1]
-                
+
                 # forward
                 out_port = self.portmap[src][dst]
-                self._add_dynamic_flow(self.datapaths[src], 1, out_port, 2048, nw_src=arp_pkt.src_ip, nw_dst=arp_pkt.dst_ip, soft_timeout=1)
-                self._add_dynamic_flow(self.datapaths[src], 1, out_port, 2054, arp_spa=arp_pkt.src_ip, arp_tpa=arp_pkt.dst_ip, soft_timeout=1)
+                self._add_dynamic_flow(self.datapaths[src], 1, out_port, 2048, nw_src=arp_pkt.src_ip, nw_dst=arp_pkt.dst_ip, soft_timeout=2)
+                self._add_dynamic_flow(self.datapaths[src], 1, out_port, 2054, arp_spa=arp_pkt.src_ip, arp_tpa=arp_pkt.dst_ip, soft_timeout=2)
 
                 # backward
                 out_port = self.portmap[dst][src]
-                self._add_dynamic_flow(self.datapaths[dst], 1, out_port, 2048, nw_src=arp_pkt.dst_ip, nw_dst=arp_pkt.src_ip, soft_timeout=1)
-                self._add_dynamic_flow(self.datapaths[dst], 1, out_port, 2054, arp_spa=arp_pkt.dst_ip, arp_tpa=arp_pkt.src_ip, soft_timeout=1)
+                self._add_dynamic_flow(self.datapaths[dst], 1, out_port, 2048, nw_src=arp_pkt.dst_ip, nw_dst=arp_pkt.src_ip, soft_timeout=2)
+                self._add_dynamic_flow(self.datapaths[dst], 1, out_port, 2054, arp_spa=arp_pkt.dst_ip, arp_tpa=arp_pkt.src_ip, soft_timeout=2)
 
             src = path[0]
             dst = path[1]
@@ -304,7 +305,7 @@ class AISwitch(app_manager.RyuApp):
             out = parser.OFPPacketOut(datapath=datapath, buffer_id=msg.buffer_id,
                                   in_port=in_port, actions=actions, data=data)
             datapath.send_msg(out)
-        
+
         elif eth_pkt:
             if eth_pkt.dst.split(':')[1] == '00' and eth_pkt.src.split(':')[1] == '00':
                 self.logger.info("packet in %s %s %s %s", datapath.id, eth_pkt.src, eth_pkt.dst, in_port)
@@ -332,11 +333,11 @@ class AISwitch(app_manager.RyuApp):
 
                     # forward
                     out_port = self.portmap[src][dst]
-                    self._add_dynamic_flow(self.datapaths[src], 1, out_port, None, eth_src=eth_pkt.src, eth_dst=eth_pkt.dst, soft_timeout=1)
+                    self._add_dynamic_flow(self.datapaths[src], 1, out_port, None, eth_src=eth_pkt.src, eth_dst=eth_pkt.dst, soft_timeout=2)
 
                     # backward
                     out_port = self.portmap[dst][src]
-                    self._add_dynamic_flow(self.datapaths[dst], 1, out_port, None, eth_src=eth_pkt.dst, eth_dst=eth_pkt.src, soft_timeout=1)
+                    self._add_dynamic_flow(self.datapaths[dst], 1, out_port, None, eth_src=eth_pkt.dst, eth_dst=eth_pkt.src, soft_timeout=2)
 
                 src = path[0]
                 dst = path[1]
@@ -348,7 +349,7 @@ class AISwitch(app_manager.RyuApp):
                 out = parser.OFPPacketOut(datapath=datapath, buffer_id=msg.buffer_id,
                                       in_port=in_port, actions=actions, data=data)
                 datapath.send_msg(out)
-        
+
         elif ip4_pkt:
             print 'IP4 NEED HANDLE'
 
@@ -370,7 +371,7 @@ class FlowViewer(ControllerBase):
     def _list_flow_rate(self, req, **kwargs):
         body = json.dumps(self.ai_switch_app.flow_rate)
         return Response(content_type='application/json', body=body)
-        
+
     @route('network', '/stats/network', methods=['GET'])
     def _list_net(self, req, **kwargs):
         body = json.dumps(json_graph.node_link_data(self.ai_switch_app.graph))
