@@ -1,6 +1,6 @@
 ryu:
-  command: ryu-manager
-  image: rf37535/ryu
+  command: ryu-manager /source/ai_switch.py --observe-links
+  image: rf37535/ryu:networkx
   ports:
     - 6633:6633
   volumes:
