@@ -6,3 +6,9 @@ ryu:
     - 8080:8080
   volumes:
     - "./Controller:/source"
+
+mininet:
+  image: rf37535/mininet:openflow13
+  volumes:
+    - "./Mininet:/source"
+  privileged: true
