@@ -1,17 +1,21 @@
 from ryu.base import app_manager
-from ryu.lib import dpid as dpid_lib
 from ryu.lib import hub
-from ryu.topology.api import get_switch, get_link
 from ryu.controller import ofp_event
-from ryu.controller.handler import CONFIG_DISPATCHER, MAIN_DISPATCHER, DEAD_DISPATCHER
+from ryu.controller.handler import CONFIG_DISPATCHER
+from ryu.controller.handler import MAIN_DISPATCHER
+from ryu.controller.handler import DEAD_DISPATCHER
 from ryu.controller.handler import set_ev_cls
+from ryu.topology.api import get_link
 from ryu.ofproto import ofproto_v1_3
 from ryu.lib.packet import packet, ethernet, arp, ipv4
 from ryu.app.wsgi import ControllerBase, WSGIApplication, route
 from webob import Response
 from networkx.readwrite import json_graph
 import networkx as nx
-import array, requests, json, time
+import array
+import json
+import time
+
 
 class AISwitch(app_manager.RyuApp):
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
@@ -87,7 +91,6 @@ class AISwitch(app_manager.RyuApp):
             hub.sleep(1)
 
     def _request_stats(self, datapath):
-        ofproto = datapath.ofproto
         parser = datapath.ofproto_parser
         req = parser.OFPFlowStatsRequest(datapath)
         datapath.send_msg(req)
@@ -97,10 +100,11 @@ class AISwitch(app_manager.RyuApp):
         body = ev.msg.body
         for flow in body:
             try:
-                src, dst = int(flow.match['eth_src'].split(':')[-1], 16), int(flow.match['eth_dst'].split(':')[-1], 16)
-                #print 'Datapath->' + str(ev.msg.datapath.id) + ' eth_src->' + str(flow.match['eth_src']) + ' eth_dst->' + str(flow.match['eth_dst']) + ' Byte Count->' + str(flow.byte_count)
+                src = int(flow.match['eth_src'].split(':')[-1], 16)
+                dst = int(flow.match['eth_dst'].split(':')[-1], 16)
                 key = str(src) + '-' + str(dst)
-                self.statistics.setdefault(key, [0, 0, 0]) # Now, Before, Timestamp
+                self.statistics.setdefault(key, [0, 0, 0])  # Now, Beforem Timestamp
+
                 if time.time() - self.statistics[key][2] > 0.5:
                     self.statistics[key][1] = self.statistics[key][0]
                     self.statistics[key][0] = flow.byte_count
@@ -109,9 +113,9 @@ class AISwitch(app_manager.RyuApp):
             except:
                 try:
                     src, dst = int(flow.match['ipv4_dst'].split('.')[-1]), int(flow.match['ipv4_src'].split('.')[-1])
-                    #print 'Datapath->' + str(ev.msg.datapath.id) + ' ipv4_src->' + str(flow.match['ipv4_src']) + ' ipv4_dst->' + str(flow.match['ipv4_dst']) + ' Byte Count->' + str(flow.byte_count)
+
                     key = str(src) + '-' + str(dst)
-                    self.statistics.setdefault(key, [0, 0, 0]) # Now, Before, Timestamp
+                    self.statistics.setdefault(key, [0, 0, 0])  # Now, Before, Timestamp
                     if time.time() - self.statistics[key][2] > 0.5:
                         self.statistics[key][1] = self.statistics[key][0]
                         self.statistics[key][0] = flow.byte_count
@@ -140,8 +144,11 @@ class AISwitch(app_manager.RyuApp):
         parser = datapath.ofproto_parser
         inst = [parser.OFPInstructionActions(ofproto.OFPIT_APPLY_ACTIONS,
                                              actions)]
-        mod = parser.OFPFlowMod(datapath=datapath, priority=priority,
-	                                    match=match, instructions=inst, command=ofproto.OFPFC_ADD)
+        mod = parser.OFPFlowMod(datapath=datapath,
+                                priority=priority,
+                                match=match,
+                                instructions=inst,
+                                command=ofproto.OFPFC_ADD)
         datapath.send_msg(mod)
 
     def _add_dynamic_flow(self, datapath, priority, out_port, dl_type, arp_tpa=None, arp_spa=None, nw_src=None, nw_dst=None, eth_src=None, eth_dst=None, soft_timeout=0, hard_timeout=0):
@@ -159,7 +166,7 @@ class AISwitch(app_manager.RyuApp):
             self.active_flows[key] = reduce(lambda a, b: b[0] in a and a or a + b, [[i] for i in self.active_flows[key]])
         elif dl_type == 2054:
             match = parser.OFPMatch(eth_type=dl_type, arp_spa=arp_tpa, arp_tpa=arp_tpa)
-        elif dl_type == None:
+        elif dl_type is None:
             match = parser.OFPMatch(eth_src=eth_src, eth_dst=eth_dst)
             src = int(eth_src.split(':')[-1], 16)
             dst = int(eth_dst.split(':')[-1], 16)
@@ -170,17 +177,18 @@ class AISwitch(app_manager.RyuApp):
         else:
             print 'ADD ERROR'
 
-        mod = parser.OFPFlowMod(datapath=datapath, priority=priority,
-	                                    match=match, instructions=inst,
-	                                    command=ofproto.OFPFC_ADD, idle_timeout=soft_timeout,
-	                                    hard_timeout=hard_timeout, flags=ofproto.OFPFF_SEND_FLOW_REM)
+        mod = parser.OFPFlowMod(datapath=datapath,
+                                priority=priority,
+                                match=match, instructions=inst,
+                                command=ofproto.OFPFC_ADD, idle_timeout=soft_timeout,
+                                hard_timeout=hard_timeout, flags=ofproto.OFPFF_SEND_FLOW_REM)
         datapath.send_msg(mod)
 
     @set_ev_cls(ofp_event.EventOFPStateChange, [MAIN_DISPATCHER, DEAD_DISPATCHER])
     def _state_change_handler(self, ev):
         datapath = ev.datapath
         if ev.state == MAIN_DISPATCHER:
-            if not datapath.id in self.datapaths:
+            if datapath.id not in self.datapaths:
                 self.logger.info('register datapath: %016d', datapath.id)
                 self.datapaths[datapath.id] = datapath
                 self.graph.add_node(datapath.id)
@@ -194,8 +202,9 @@ class AISwitch(app_manager.RyuApp):
     def _flow_removed_handler(self, ev):
         msg = ev.msg
         dp = msg.datapath
-        ofp = dp.ofproto
+        # ofp = dp.ofproto
 
+        '''
         if msg.reason == ofp.OFPRR_IDLE_TIMEOUT:
             reason = 'IDLE TIMEOUT'
         elif msg.reason == ofp.OFPRR_HARD_TIMEOUT:
@@ -206,6 +215,7 @@ class AISwitch(app_manager.RyuApp):
             reason = 'GROUP DELETE'
         else:
             reason = 'unknown'
+        '''
 
         if 'ipv4_src' in msg.match:
             src = int(msg.match['ipv4_src'].split('.')[-1])
@@ -244,8 +254,6 @@ class AISwitch(app_manager.RyuApp):
 
         else:
             print 'ERROR', msg.match
-
-
 
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
     def _packet_in_handler(self, ev):
@@ -301,8 +309,11 @@ class AISwitch(app_manager.RyuApp):
             data = None
             if msg.buffer_id == ofproto.OFP_NO_BUFFER:
                 data = msg.data
-            out = parser.OFPPacketOut(datapath=datapath, buffer_id=msg.buffer_id,
-                                  in_port=in_port, actions=actions, data=data)
+            out = parser.OFPPacketOut(datapath=datapath,
+                                      buffer_id=msg.buffer_id,
+                                      in_port=in_port,
+                                      actions=actions,
+                                      data=data)
             datapath.send_msg(out)
 
         elif eth_pkt:
@@ -345,8 +356,11 @@ class AISwitch(app_manager.RyuApp):
                 data = None
                 if msg.buffer_id == ofproto.OFP_NO_BUFFER:
                     data = msg.data
-                out = parser.OFPPacketOut(datapath=datapath, buffer_id=msg.buffer_id,
-                                      in_port=in_port, actions=actions, data=data)
+                out = parser.OFPPacketOut(datapath=datapath,
+                                          buffer_id=msg.buffer_id,
+                                          in_port=in_port,
+                                          actions=actions,
+                                          data=data)
                 datapath.send_msg(out)
 
         elif ip4_pkt:
@@ -354,6 +368,7 @@ class AISwitch(app_manager.RyuApp):
 
         else:
             print 'ERROR'
+
 
 class FlowViewer(ControllerBase):
     def __init__(self, req, link, data, **config):
