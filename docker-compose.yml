@@ -1,3 +1,6 @@
+rabbitmq:
+  image: rf37535/rabbitmq
+
 ryu:
   command: ryu-manager --observe-links /source/ai_switch.py /source/rest_topology.py /source/ofctl_rest.py
   image: rf37535/ryu:openstack
@@ -6,6 +9,8 @@ ryu:
     - 8080:8080
   volumes:
     - "./Controller:/source"
+  links: 
+    - rabbitmq
 
 mininet:
   image: rf37535/mininet:openflow13
