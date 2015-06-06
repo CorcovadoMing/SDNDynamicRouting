@@ -34,7 +34,6 @@ class AISwitch(app_manager.RyuApp):
 
         self._measurement = hub.spawn(self._measurement)
         self._update = hub.spawn(self._update)
-        
 
         wsgi = kwargs['wsgi']
         wsgi.register(FlowViewer, {'ai_switch_app': self})

@@ -1,7 +1,8 @@
 ryu:
-  command: ryu-manager /source/ai_switch.py --observe-links
-  image: rf37535/ryu:networkx
+  command: ryu-manager --observe-links /source/ai_switch.py /source/rest_topology.py /source/ofctl_rest.py
+  image: rf37535/ryu:openstack
   ports:
     - 6633:6633
+    - 8080:8080
   volumes:
     - "./Controller:/source"
