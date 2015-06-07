@@ -9,7 +9,7 @@ def up():
 
 def mn():
     with hide('running'):
-        local("docker-compose run mininet mn --switch user")
+        local("docker-compose run mininet mn --link tc,bw=0.1 --custom /source/topo3.py --topo project --switch user --controller remote,ip=192.168.59.103 --mac")
 
 def ps():
     with hide('running'):

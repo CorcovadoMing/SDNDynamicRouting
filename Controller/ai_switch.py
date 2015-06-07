@@ -7,7 +7,7 @@ from ryu.controller.handler import DEAD_DISPATCHER
 from ryu.controller.handler import set_ev_cls
 from ryu.topology.api import get_link
 from ryu.ofproto import ofproto_v1_3
-from ryu.lib.packet import packet, ethernet, arp, ipv4
+from ryu.lib.packet import packet, ethernet, arp
 from ryu.app.wsgi import ControllerBase, WSGIApplication, route
 from webob import Response
 from networkx.readwrite import json_graph
@@ -44,40 +44,50 @@ class AISwitch(app_manager.RyuApp):
 
     def _update(self):
         while True:
-            for i in self.data:
-                src = int(i['src']['dpid'], 16)
-                dst = int(i['dst']['dpid'], 16)
-                self.portmap.setdefault(src, {})
-                self.portmap.setdefault(dst, {})
-                self.portmap[src][dst] = int(i['src']['port_no'])
-                self.portmap[dst][src] = int(i['dst']['port_no'])
-                self.graph.add_weighted_edges_from([(src, dst, self.default_weight)])
+            try:
+                for i in self.data:
+                    src = int(i['src']['dpid'], 16)
+                    dst = int(i['dst']['dpid'], 16)
+                    self.portmap.setdefault(src, {})
+                    self.portmap.setdefault(dst, {})
+                    self.portmap[src][dst] = int(i['src']['port_no'])
+                    self.portmap[dst][src] = int(i['dst']['port_no'])
+                    self.graph.add_weighted_edges_from([(src, dst, self.default_weight)])
 
-            if len(self.flow_rate) != 0 and len(self.active_flows) != 0:
-                for key in self.flow_rate:
-                    update_path = self.active_flows[key][:]
-                    src, dst = int(key.split('-')[0]), int(key.split('-')[1])
-                    if src < dst:
-                        if update_path[-1] == src:
-                            update_path.insert(0, dst)
+                # force reset
+                if len(self.active_flows) == 0:
+                    self.flow_rate = {}
+
+                if len(self.flow_rate) != 0 and len(self.active_flows) != 0:
+                    print '[Updating]'
+                    for key in self.flow_rate:
+                        update_path = self.active_flows[key][:]
+                        src, dst = int(key.split('-')[0]), int(key.split('-')[1])
+                        if src < dst:
+                            if update_path[-1] == src:
+                                update_path.insert(0, dst)
+                            else:
+                                update_path.append(dst)
                         else:
-                            update_path.append(dst)
-                    else:
-                        if update_path[0] == src:
-                            update_path.append(dst)
-                        else:
-                            update_path.insert(0, dst)
-                    for i in xrange(len(update_path)-1):
-                        s, t = update_path[i], update_path[i+1]
-                        if s > t:
-                            s, t = t, s
-                        self.graph[s][t]['weight'] += self.flow_rate[key]
+                            if update_path[0] == src:
+                                update_path.append(dst)
+                            else:
+                                update_path.insert(0, dst)
+                        for i in xrange(len(update_path)-1):
+                            s, t = update_path[i], update_path[i+1]
+                            if s > t:
+                                s, t = t, s
+                            self.graph[s][t]['weight'] += self.flow_rate[key]
+            except:
+                pass
             hub.sleep(0.2)
 
     def _measurement(self):
         while True:
             print 'ActiveFlows: ', self.active_flows
             print 'FlowRate: ', self.flow_rate
+            print 'Graph: ', json.dumps(json_graph.node_link_data(self.graph))
+
             if len(self.active_flows) != 0:
                 for path in self.active_flows:
                     if path.split('-')[0] == str(self.active_flows[path][-1]):
@@ -109,7 +119,8 @@ class AISwitch(app_manager.RyuApp):
                     self.statistics[key][1] = self.statistics[key][0]
                     self.statistics[key][0] = flow.byte_count
                     self.statistics[key][2] = time.time()
-                    self.flow_rate[key] = self.statistics[key][0] - self.statistics[key][1]
+                    rate = max(self.statistics[key][0] - self.statistics[key][1], 0)
+                    self.flow_rate[key] = rate
             except:
                 try:
                     src, dst = int(flow.match['ipv4_dst'].split('.')[-1]), int(flow.match['ipv4_src'].split('.')[-1])
@@ -120,7 +131,8 @@ class AISwitch(app_manager.RyuApp):
                         self.statistics[key][1] = self.statistics[key][0]
                         self.statistics[key][0] = flow.byte_count
                         self.statistics[key][2] = time.time()
-                        self.flow_rate[key] = self.statistics[key][0] - self.statistics[key][1]
+                        rate = max(self.statistics[key][0] - self.statistics[key][1], 0)
+                        self.flow_rate[key] = rate
                 except:
                     pass
 
@@ -202,20 +214,6 @@ class AISwitch(app_manager.RyuApp):
     def _flow_removed_handler(self, ev):
         msg = ev.msg
         dp = msg.datapath
-        # ofp = dp.ofproto
-
-        '''
-        if msg.reason == ofp.OFPRR_IDLE_TIMEOUT:
-            reason = 'IDLE TIMEOUT'
-        elif msg.reason == ofp.OFPRR_HARD_TIMEOUT:
-            reason = 'HARD TIMEOUT'
-        elif msg.reason == ofp.OFPRR_DELETE:
-            reason = 'DELETE'
-        elif msg.reason == ofp.OFPRR_GROUP_DELETE:
-            reason = 'GROUP DELETE'
-        else:
-            reason = 'unknown'
-        '''
 
         if 'ipv4_src' in msg.match:
             src = int(msg.match['ipv4_src'].split('.')[-1])
@@ -266,7 +264,6 @@ class AISwitch(app_manager.RyuApp):
         pkt = packet.Packet(array.array('B', msg.data))
         eth_pkt = pkt.get_protocol(ethernet.ethernet)
         arp_pkt = pkt.get_protocol(arp.arp)
-        ip4_pkt = pkt.get_protocol(ipv4.ipv4)
 
         if arp_pkt:
             links = get_link(self, None)
@@ -283,10 +280,11 @@ class AISwitch(app_manager.RyuApp):
                 except:
                     self.graph.add_weighted_edges_from([(src, dst, self.default_weight)])
 
+            # path calculation
             src = int(arp_pkt.src_ip.split('.')[-1])
             dst = int(arp_pkt.dst_ip.split('.')[-1])
-
-            path = nx.shortest_path(self.graph, source=ev.msg.datapath.id, target=dst)
+            cur = datapath.id
+            path = nx.shortest_path(self.graph, source=cur, target=dst)
 
             for i in xrange(len(path)-1):
                 src = path[i]
@@ -333,9 +331,11 @@ class AISwitch(app_manager.RyuApp):
                     except:
                         self.graph.add_weighted_edges_from([(src, dst, self.default_weight)])
 
+                # path calculation
                 src = int(eth_pkt.src.split(':')[-1], 16)
                 dst = int(eth_pkt.dst.split(':')[-1], 16)
-                path = nx.dijkstra_path(self.graph, source=datapath.id, target=dst)
+                cur = datapath.id
+                path = nx.dijkstra_path(self.graph, source=cur, target=dst)
 
                 for i in xrange(len(path)-1):
                     src = path[i]
@@ -362,12 +362,6 @@ class AISwitch(app_manager.RyuApp):
                                           actions=actions,
                                           data=data)
                 datapath.send_msg(out)
-
-        elif ip4_pkt:
-            print 'IP4 NEED HANDLE'
-
-        else:
-            print 'ERROR'
 
 
 class FlowViewer(ControllerBase):
