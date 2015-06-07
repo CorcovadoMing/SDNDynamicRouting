@@ -12,7 +12,8 @@ import networkx as nx
 import array
 import json
 import time
-
+import hashlib
+from shell import shell_command
 
 class AISwitch(app_manager.RyuApp):
     def __init__(self, *args, **kwargs):
@@ -23,7 +24,7 @@ class AISwitch(app_manager.RyuApp):
         self.data = {}
         self.graph = nx.Graph()
         self.default_weight = 1
-
+        self.hash_table = {}
         self.active_flows = {}
         self.statistics = {}
         self.flow_rate = {}
@@ -267,6 +268,18 @@ class AISwitch(app_manager.RyuApp):
         else:
             print 'ERROR', msg.match
 
+    def calculate_path(self, src, dst):
+        hash = hashlib.sha1()
+        hash.update(str(src)+str(dst)+str(time.time()))
+        self.hash_table[hash.hexdigest()] = ''
+
+        out, err = shell_command(['./a'])
+        self.hash_table[hash.hexdigest()] = out
+
+        print self.hash_table
+        del self.hash_table[hash.hexdigest()]
+        return nx.shortest_path(self.graph, source=src, target=dst)
+
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
     def _packet_in_handler(self, ev):
         msg = ev.msg
@@ -298,7 +311,8 @@ class AISwitch(app_manager.RyuApp):
             src = int(arp_pkt.src_ip.split('.')[-1])
             dst = int(arp_pkt.dst_ip.split('.')[-1])
             cur = datapath.id
-            path = nx.shortest_path(self.graph, source=cur, target=dst)
+            # path = nx.shortest_path(self.graph, source=cur, target=dst)
+            path = self.calculate_path(cur, dst)
 
             for i in xrange(len(path)-1):
                 src = path[i]
@@ -349,7 +363,8 @@ class AISwitch(app_manager.RyuApp):
                 src = int(eth_pkt.src.split(':')[-1], 16)
                 dst = int(eth_pkt.dst.split(':')[-1], 16)
                 cur = datapath.id
-                path = nx.dijkstra_path(self.graph, source=cur, target=dst)
+                # path = nx.dijkstra_path(self.graph, source=cur, target=dst)
+                path = self.calculate_path(cur, dst)
 
                 for i in xrange(len(path)-1):
                     src = path[i]
