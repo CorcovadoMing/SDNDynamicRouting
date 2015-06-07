@@ -1,10 +1,7 @@
 from ryu.base import app_manager
 from ryu.lib import hub
 from ryu.controller import ofp_event
-from ryu.controller.handler import CONFIG_DISPATCHER
-from ryu.controller.handler import MAIN_DISPATCHER
-from ryu.controller.handler import DEAD_DISPATCHER
-from ryu.controller.handler import set_ev_cls
+from ryu.controller.handler import CONFIG_DISPATCHER, MAIN_DISPATCHER, DEAD_DISPATCHER, set_ev_cls
 from ryu.topology.api import get_link
 from ryu.ofproto import ofproto_v1_3
 from ryu.lib.packet import packet, ethernet, arp
@@ -18,11 +15,6 @@ import time
 
 
 class AISwitch(app_manager.RyuApp):
-    OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
-    _CONTEXTS = {
-        'wsgi': WSGIApplication
-    }
-
     def __init__(self, *args, **kwargs):
         super(AISwitch, self).__init__(*args, **kwargs)
 
@@ -39,65 +31,84 @@ class AISwitch(app_manager.RyuApp):
         self._measurement = hub.spawn(self._measurement)
         self._update = hub.spawn(self._update)
 
-        wsgi = kwargs['wsgi']
-        wsgi.register(FlowViewer, {'ai_switch_app': self})
+        self.OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
+
+        self._CONTEXTS = {
+            'wsgi': WSGIApplication
+        }
+
+        self.wsgi = kwargs['wsgi']
+        self.wsgi.register(FlowViewer, {'ai_switch_app': self})
+
+    '''
+    ###  Update
+    '''
+    def _initial_state(self):
+        for i in self.data:
+            src = int(i['src']['dpid'], 16)
+            dst = int(i['dst']['dpid'], 16)
+            self.portmap.setdefault(src, {})
+            self.portmap.setdefault(dst, {})
+            self.portmap[src][dst] = int(i['src']['port_no'])
+            self.portmap[dst][src] = int(i['dst']['port_no'])
+            self.graph.add_weighted_edges_from([(src, dst, self.default_weight)])
+
+    def _clean_flow_rate(self):
+        if len(self.active_flows) == 0:
+            self.flow_rate = {}
+
+    def _update_graph(self):
+        if len(self.flow_rate) != 0 and len(self.active_flows) != 0:
+            for key in self.flow_rate:
+                update_path = self.active_flows[key][:]
+                src, dst = int(key.split('-')[0]), int(key.split('-')[1])
+                if src < dst:
+                    if update_path[-1] == src:
+                        update_path.insert(0, dst)
+                    else:
+                        update_path.append(dst)
+                else:
+                    if update_path[0] == src:
+                        update_path.append(dst)
+                    else:
+                        update_path.insert(0, dst)
+                for i in xrange(len(update_path)-1):
+                    s, t = update_path[i], update_path[i+1]
+                    if s > t:
+                        s, t = t, s
+                    self.graph[s][t]['weight'] += self.flow_rate[key]
 
     def _update(self):
         while True:
             try:
-                for i in self.data:
-                    src = int(i['src']['dpid'], 16)
-                    dst = int(i['dst']['dpid'], 16)
-                    self.portmap.setdefault(src, {})
-                    self.portmap.setdefault(dst, {})
-                    self.portmap[src][dst] = int(i['src']['port_no'])
-                    self.portmap[dst][src] = int(i['dst']['port_no'])
-                    self.graph.add_weighted_edges_from([(src, dst, self.default_weight)])
-
-                # force reset
-                if len(self.active_flows) == 0:
-                    self.flow_rate = {}
-
-                if len(self.flow_rate) != 0 and len(self.active_flows) != 0:
-                    print '[Updating]'
-                    for key in self.flow_rate:
-                        update_path = self.active_flows[key][:]
-                        src, dst = int(key.split('-')[0]), int(key.split('-')[1])
-                        if src < dst:
-                            if update_path[-1] == src:
-                                update_path.insert(0, dst)
-                            else:
-                                update_path.append(dst)
-                        else:
-                            if update_path[0] == src:
-                                update_path.append(dst)
-                            else:
-                                update_path.insert(0, dst)
-                        for i in xrange(len(update_path)-1):
-                            s, t = update_path[i], update_path[i+1]
-                            if s > t:
-                                s, t = t, s
-                            self.graph[s][t]['weight'] += self.flow_rate[key]
+                self._initial_state()
+                self._clean_flow_rate()
+                self._update_graph()
             except:
                 pass
-            hub.sleep(0.2)
+            hub.sleep(0.01)
+
+    '''
+    ###  Measurement
+    '''
+    def _send_measure_request(self):
+        if len(self.active_flows) != 0:
+            for path in self.active_flows:
+                if path.split('-')[0] == str(self.active_flows[path][-1]):
+                    target = self.active_flows[path][0]
+                else:
+                    target = self.active_flows[path][-1]
+                for dp in self.datapaths.values():
+                    if dp.id == target:
+                        self._request_stats(dp)
+                        break
 
     def _measurement(self):
         while True:
             print 'ActiveFlows: ', self.active_flows
             print 'FlowRate: ', self.flow_rate
             print 'Graph: ', json.dumps(json_graph.node_link_data(self.graph))
-
-            if len(self.active_flows) != 0:
-                for path in self.active_flows:
-                    if path.split('-')[0] == str(self.active_flows[path][-1]):
-                        target = self.active_flows[path][0]
-                    else:
-                        target = self.active_flows[path][-1]
-                    for dp in self.datapaths.values():
-                        if dp.id == target:
-                            self._request_stats(dp)
-                            break
+            self._send_measure_request()
             hub.sleep(1)
 
     def _request_stats(self, datapath):
@@ -136,6 +147,9 @@ class AISwitch(app_manager.RyuApp):
                 except:
                     pass
 
+    '''
+    ###  SDN event
+    '''
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
     def _switch_features_handler(self, ev):
         datapath = ev.msg.datapath

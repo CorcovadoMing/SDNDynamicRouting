@@ -7,9 +7,9 @@ def up():
     with hide('running'):
         print green(local("docker-compose up -d", capture=True))
 
-def mn():
+def mn(topology=3):
     with hide('running'):
-        local("docker-compose run mininet mn --link tc,bw=0.1 --custom /source/topo3.py --topo project --switch user --controller remote,ip=192.168.59.103 --mac")
+        local("docker-compose run mininet mn --link tc,bw=0.1 --custom /source/topo" + str(topology) + ".py --topo project --switch user --controller remote,ip=192.168.59.103 --mac")
 
 def ps():
     with hide('running'):
