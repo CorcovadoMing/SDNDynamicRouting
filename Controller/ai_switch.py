@@ -12,8 +12,8 @@ import networkx as nx
 import array
 import json
 import time
-import hashlib
 from shell import shell_command
+
 
 class AISwitch(app_manager.RyuApp):
     def __init__(self, *args, **kwargs):
@@ -60,6 +60,7 @@ class AISwitch(app_manager.RyuApp):
 
     def _update_graph(self):
         if len(self.flow_rate) != 0 and len(self.active_flows) != 0:
+            print '[Updating]'
             for key in self.flow_rate:
                 update_path = self.active_flows[key][:]
                 src, dst = int(key.split('-')[0]), int(key.split('-')[1])
@@ -87,7 +88,7 @@ class AISwitch(app_manager.RyuApp):
                 self._update_graph()
             except:
                 pass
-            hub.sleep(0.01)
+            hub.sleep(0.1)
 
     '''
     ###  Measurement
@@ -269,16 +270,16 @@ class AISwitch(app_manager.RyuApp):
             print 'ERROR', msg.match
 
     def calculate_path(self, src, dst):
-        hash = hashlib.sha1()
-        hash.update(str(src)+str(dst)+str(time.time()))
-        self.hash_table[hash.hexdigest()] = ''
+        # hash = hashlib.sha1()
+        # hash.update(str(src)+str(dst)+str(time.time()))
+        # self.hash_table[hash.hexdigest()] = ''
+        out, err = shell_command(['./routing', json.dumps(json_graph.node_link_data(self.graph)), str(src), str(dst)])
+        return [x+1 for x in map(int, out.split())]
+        # self.hash_table[hash.hexdigest()] = out
 
-        out, err = shell_command(['./a'])
-        self.hash_table[hash.hexdigest()] = out
-
-        print self.hash_table
-        del self.hash_table[hash.hexdigest()]
-        return nx.shortest_path(self.graph, source=src, target=dst)
+        # print self.hash_table
+        # del self.hash_table[hash.hexdigest()]
+        # return nx.shortest_path(self.graph, source=src, target=dst)
 
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
     def _packet_in_handler(self, ev):
@@ -318,15 +319,17 @@ class AISwitch(app_manager.RyuApp):
                 src = path[i]
                 dst = path[i+1]
 
-                # forward
-                out_port = self.portmap[src][dst]
-                self._add_dynamic_flow(self.datapaths[src], 1, out_port, 2048, nw_src=arp_pkt.src_ip, nw_dst=arp_pkt.dst_ip, soft_timeout=2)
-                self._add_dynamic_flow(self.datapaths[src], 1, out_port, 2054, arp_spa=arp_pkt.src_ip, arp_tpa=arp_pkt.dst_ip, soft_timeout=2)
-
-                # backward
-                out_port = self.portmap[dst][src]
-                self._add_dynamic_flow(self.datapaths[dst], 1, out_port, 2048, nw_src=arp_pkt.dst_ip, nw_dst=arp_pkt.src_ip, soft_timeout=2)
-                self._add_dynamic_flow(self.datapaths[dst], 1, out_port, 2054, arp_spa=arp_pkt.dst_ip, arp_tpa=arp_pkt.src_ip, soft_timeout=2)
+                try:
+                    # forward
+                    out_port = self.portmap[src][dst]
+                    self._add_dynamic_flow(self.datapaths[src], 1, out_port, 2048, nw_src=arp_pkt.src_ip, nw_dst=arp_pkt.dst_ip, soft_timeout=2)
+                    self._add_dynamic_flow(self.datapaths[src], 1, out_port, 2054, arp_spa=arp_pkt.src_ip, arp_tpa=arp_pkt.dst_ip, soft_timeout=2)
+                    # backward
+                    out_port = self.portmap[dst][src]
+                    self._add_dynamic_flow(self.datapaths[dst], 1, out_port, 2048, nw_src=arp_pkt.dst_ip, nw_dst=arp_pkt.src_ip, soft_timeout=2)
+                    self._add_dynamic_flow(self.datapaths[dst], 1, out_port, 2054, arp_spa=arp_pkt.dst_ip, arp_tpa=arp_pkt.src_ip, soft_timeout=2)
+                except:
+                    pass
 
             src = path[0]
             dst = path[1]
@@ -370,13 +373,15 @@ class AISwitch(app_manager.RyuApp):
                     src = path[i]
                     dst = path[i+1]
 
-                    # forward
-                    out_port = self.portmap[src][dst]
-                    self._add_dynamic_flow(self.datapaths[src], 1, out_port, None, eth_src=eth_pkt.src, eth_dst=eth_pkt.dst, soft_timeout=2)
-
-                    # backward
-                    out_port = self.portmap[dst][src]
-                    self._add_dynamic_flow(self.datapaths[dst], 1, out_port, None, eth_src=eth_pkt.dst, eth_dst=eth_pkt.src, soft_timeout=2)
+                    try:
+                        # forward
+                        out_port = self.portmap[src][dst]
+                        self._add_dynamic_flow(self.datapaths[src], 1, out_port, None, eth_src=eth_pkt.src, eth_dst=eth_pkt.dst, soft_timeout=2)
+                        # backward
+                        out_port = self.portmap[dst][src]
+                        self._add_dynamic_flow(self.datapaths[dst], 1, out_port, None, eth_src=eth_pkt.dst, eth_dst=eth_pkt.src, soft_timeout=2)
+                    except:
+                        pass
 
                 src = path[0]
                 dst = path[1]
@@ -412,4 +417,9 @@ class FlowViewer(ControllerBase):
     @route('network', '/stats/network', methods=['GET'])
     def _list_net(self, req, **kwargs):
         body = json.dumps(json_graph.node_link_data(self.ai_switch_app.graph))
+        return Response(content_type='application/json', body=body)
+
+    @route('port', '/stats/ports', methods=['GET'])
+    def _list_ports(self, req, **kwargs):
+        body = json.dumps(self.ai_switch_app.portmap)
         return Response(content_type='application/json', body=body)

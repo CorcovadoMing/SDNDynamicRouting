@@ -1,11 +1,12 @@
 ryu:
-  command: bash -c "cd /source && g++ a.cpp -o a &&  ryu-manager --observe-links *.py"
+  command: bash -c "cd /source && ryu-manager --observe-links *.py"
   image: rf37535/ryu:openstack
   ports:
     - 6633:6633
     - 8080:8080
   volumes:
     - "./Controller:/source"
+    - "./Routing:/routing"
 
 mininet:
   image: rf37535/mininet:openflow13
